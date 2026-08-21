@@ -1,8 +1,57 @@
-# Session Handoff — Battle system built, needs manual click-through verification
+# Session Handoff — Save system + in-game Menu built, needs manual click-through verification
 
-Status as of 2026-08-20 (updated same day, second session — two bugs found via real play, fixed).
-This file exists so a fresh Claude Code session (or human) has full context without re-deriving it.
-Read this before starting new work in this project.
+Status as of 2026-08-20 (updated same day, third session). This file exists so a fresh Claude Code
+session (or human) has full context without re-deriving it. Read this before starting new work in
+this project.
+
+## Milestone — Save/load system + in-game Menu + title-screen double-click fix (DONE, this session)
+
+Full design doc: `C:\Users\mohpr\.claude\plans\wobbly-tickling-sonnet.md` (5 stages, all complete).
+
+- **Save data**: new `/Game/Blueprints/SG_PokemonSave` (`SaveGame`-derived) holds `bStarterChosen`,
+  `Party` (full HP/PP), `PlayerLocation`/`PlayerRotation`, and `DialogueTreeIndex_Pink` (the one
+  narrative flag that exists in the game right now). `BP_PokemonGameInstance.SaveGame()`/
+  `LoadGame()` write/read slot `"PlayerSave"`, index 0.
+- **In-game Menu**: press **Z** to open `WBP_Menu` — a scalable option list (`MenuOptionLabels`
+  array, currently just `["Save"]`) navigated with **W/S**, confirmed with **Enter**, built via
+  `OnKeyDown` on the widget itself (not Enhanced Input — `SetInputMode_UIOnly` blocks ALL pawn-side
+  Enhanced Input actions, not just movement, so W/S/Enter had to be widget-level key handling
+  instead). Selecting Save shows a Yes/No confirmation; Yes saves and closes, No just closes — both
+  end back in the overworld, neither returns to the option list. Z again while open also closes it
+  (toggle). Menu can't be opened mid-battle or mid-dialogue (guarded via `bPlayerInBattle` and a
+  dialogue-widget-validity check). Adding a second menu option later is a one-line array addition
+  plus one new case in `WBP_Menu.TryActivateSelectedOption`'s string dispatch — no architecture
+  changes needed.
+- **Title screen**: `Btn_Continue` and `Btn_NewGame` now genuinely diverge (previously identical).
+  New Game resets `bStarterChosen`/`Party` on the game instance defensively. Continue calls
+  `LoadGame()` immediately, then — once the fade-out completes — teleports the player pawn to the
+  saved location/rotation and restores `NPC_Pink`'s dialogue-tree index. `Btn_Continue` is disabled
+  at `EventConstruct` if no save file exists (`DoesSaveGameExist`).
+- **Double-click bug fixed**: `DismissAndStartGame` now branches on `bFadingOut` at the top and
+  returns immediately if already fading (previously every click reset `FadeElapsed` back to 0,
+  which could keep the fade from ever completing under repeated clicks). All three buttons
+  (Continue/New Game/About) also get disabled the moment a real fade starts, as a visual backstop.
+
+### ⚠️ Not yet verified — needs a manual pass in-editor
+
+Same MCP limitation as every prior UI checkpoint (no click/keypress injection, no reading live
+widget properties, no calling arbitrary UFUNCTIONs on a live instance) — everything above was
+verified via exhaustive `get_node_infos` node-by-node wiring inspection and clean PIE boots only.
+**Nothing has been played through by a human yet.** Before trusting this is solid: play a starter
+pick → walk around → open Menu with Z → navigate with W/S → confirm Save with Enter → quit/restart
+→ confirm Continue is enabled and actually resumes at the right position with the right party HP
+and the right Pink dialogue state (should NOT re-offer a starter). Also sanity-check New Game still
+works normally, and try spamming Continue/New Game clicks during the fade to confirm the double-
+click fix actually holds up under real mouse input (not just node inspection).
+
+### Known cleanup items from this session (minor, not blocking)
+
+- One new Custom Event on `BP_KidRed` (bound to `WBP_Menu.OnMenuClosed`) kept its default
+  auto-generated name ("CustomEvent") — the MCP toolset has no node-rename capability. Harmless,
+  just not pretty; rename manually in-editor if it bothers you.
+- Two pre-existing, unrelated warnings surfaced during this session's PIE boots (title screen's
+  `SetInputModeUIOnly` targeting a non-focusable widget; a PaperZD "no animation class" warning on
+  some actor) — both predate this session's changes, not touched, per "don't fix incidentally."
 
 ## Two bugs found by the user playing the battle system, both fixed (2026-08-20)
 

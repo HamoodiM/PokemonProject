@@ -39,6 +39,10 @@
 		{
 			"Name": "MVVMToolset",
 			"Enabled": true
+		},
+		{
+			"Name": "VibeUE",
+			"Enabled": true
 		}
 	]
 }
