@@ -6,14 +6,56 @@ a task log — for "what's in progress right now," see [HANDOFF.md](HANDOFF.md).
 
 ## What this project is
 
-An Unreal Engine 5 top-down Pokemon-style game. **Blueprint-only** — there is no C++
-source module. Every asset (Blueprints, Widget Blueprints, Structs, DataTables,
-levels) is a binary `.uasset`/`.umap` file with no meaningful text diff. The only way
-to read or edit game logic is through the **Unreal MCP toolset** (`mcp__unreal-mcp__*`
-/ `ToolsetRegistry`), which talks to a live running Editor instance.
+An Unreal Engine 5 top-down Pokemon-style game. It was originally **Blueprint-only**;
+a C++ module (`PokemonProject`, under `Source/PokemonProject/`) was scaffolded on
+2026-08-28 as the intended home for gameplay logic going forward (see "C++ module"
+below), but as of that date it's still an empty skeleton — **almost all existing game
+logic still lives in Blueprints.** Every asset (Blueprints, Widget Blueprints, Structs,
+DataTables, levels) is a binary `.uasset`/`.umap` file with no meaningful text diff.
+For that Blueprint-side logic, the only way to read or edit it is through the
+**Unreal MCP toolset** (`mcp__unreal-mcp__*` / `ToolsetRegistry`), which talks to a
+live running Editor instance.
 
-This shapes everything below: there is no grep-the-source escape hatch. If the MCP
-server is down, you cannot verify or edit anything — you can only read `.md` files.
+This shapes everything below: for Blueprint work there is no grep-the-source escape
+hatch. If the MCP server is down, you cannot verify or edit Blueprint logic — you can
+only read `.md` files and edit C++ under `Source/`.
+
+## C++ module
+
+`Source/PokemonProject/` is a normal UBT module (`PokemonProject.Build.cs`,
+`PokemonProject.Target.cs` / `PokemonProjectEditor.Target.cs` at `Source/` root,
+declared in `PokemonProject.uproject`'s `"Modules"` array). Engine install:
+`C:\Program Files\Epic Games\UE_5.8`. It has no bundled system-wide .NET — UnrealBuildTool
+needs `DOTNET_ROOT` pointed at the engine's own copy:
+
+```
+DOTNET_ROOT="/c/Program Files/Epic Games/UE_5.8/Engine/Binaries/ThirdParty/DotNet/10.0/win-x64" \
+  "/c/Program Files/Epic Games/UE_5.8/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.exe" \
+  PokemonProjectEditor Win64 Development \
+  -project="C:\UnrealEngineProjects\PokemonProject\PokemonProject.uproject" -waitmutex
+```
+
+(There is no `GenerateProjectFiles.bat` in this engine install — use
+`UnrealBuildTool.exe -projectfiles -project=... -game -engine` with the same
+`DOTNET_ROOT` instead, if `.sln`/`.slnx` need regenerating after adding new files.)
+
+- **Adding a new C++ class**: create the `.h`/`.cpp` under `Source/PokemonProject/`
+  yourself (or reuse the Editor's `Tools > New C++ Class` wizard if working live in the
+  Editor) — either way, run the build command above afterward to compile it. A running
+  Editor instance needs to be closed and reopened (or use Live Coding) to pick up a
+  newly-added class; it won't hot-load a brand-new module addition.
+- `PokemonProjectEditor.Target.cs` sets `bOverrideBuildEnvironment = true` — this
+  editor target intentionally does not share UnrealEditor's build environment, because
+  this engine version's default warning-level settings (`UndefinedIdentifierWarningLevel`,
+  `ReturnTypeWarningLevel`, etc.) didn't match on first generation. Don't remove that
+  line without re-verifying the two targets' settings actually match, or project-file
+  generation will throw the same "modifies build environment properties" exception again.
+- `*.sln`, `*.slnx`, and `.vsconfig` at the repo root are regenerated build artifacts
+  (gitignored) — don't hand-edit them, regenerate via the command above instead.
+- No test coverage or CI exists for this module yet. If you add meaningful C++ gameplay
+  logic, prefer writing it in a way that's actually unit-testable (pure functions over
+  `AActor`/`UObject` state where reasonable) — this project's Blueprint side has no
+  equivalent and has paid for it (see `HANDOFF.md`'s many "unverified by human" notes).
 
 ## Before doing any Blueprint/UMG/level work
 
@@ -54,6 +96,21 @@ server is down, you cannot verify or edit anything — you can only read `.md` f
    calls — there is no separate subagent to delegate to, agents ARE the worker. If a
    completion notification shows a suspiciously low `tool_uses` count for the scope of
    the task, resume the agent and explicitly tell it to execute the work itself.
+7. **Hard rule: only the main session may dispatch subagents. A dispatched subagent
+   must never spawn a child agent of its own, for any reason.** This project has hit
+   real, confirmed concurrent-edit corruption from this exact failure mode more than
+   once (not just wasted tool calls — two agents independently building overlapping
+   widget subtrees on the same live Blueprint at the same time, caught via
+   `WidgetService.validate()` duplicate-name errors). Every subagent prompt dispatched
+   on this project must include an explicit instruction that it is the worker, not a
+   coordinator, and must execute all tool calls itself. If a subagent's task turns out
+   to be bigger than expected, it should say so and hand control back to the main
+   session — never spawn its own helper. If `ListAgents` ever shows more live agents
+   than the main session directly dispatched, treat it as an active corruption risk:
+   stop all of them immediately, identify which one has the fullest/most correct
+   context, tell every other one to stand down and make no further edits, and have the
+   surviving one re-read the live asset state fresh (don't trust either agent's memory
+   of what state it's in) before any cleanup or continuation.
 
 ## Project layout conventions
 
